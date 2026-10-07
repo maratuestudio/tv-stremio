@@ -12,14 +12,15 @@
         if (enviados++ > 200) return;
         try { new Image().src = 'http://192.168.0.113:8765/?m=' + encodeURIComponent(m) + '&t=' + Date.now(); } catch (e) {}
     }
-    window.addEventListener('error', function (e) { relato('ERRO ' + e.message + ' @' + e.lineno); }, true);
+    // Só erros de script; falha de imagem/recurso não tem mensagem e lotava o relatório.
+    window.addEventListener('error', function (e) { if (e.message) relato('ERRO ' + e.message + ' @' + e.lineno); }, true);
     relato('carregou ' + location.href + ' estado=' + document.readyState + ' ua=' + navigator.userAgent);
 
     var SELETOR = 'a[href], button, input, select, textarea, [ng-click], [href], [ui-sref], .tab, li[tabindex], [tabindex="0"]';
     var ESQ = 37, CIMA = 38, DIR = 39, BAIXO = 40, OK = 13, VOLTAR = 10009;
 
     var estilo = document.createElement('style');
-    estilo.textContent = '.tv-foco{outline:4px solid #8c6cff !important;outline-offset:3px !important;border-radius:12px;box-shadow:0 0 0 8px rgba(140,108,255,.25) !important;}';
+    estilo.textContent = '.bottom-notification{display:none !important}.tv-foco{outline:4px solid #8c6cff !important;outline-offset:3px !important;border-radius:12px;box-shadow:0 0 0 8px rgba(140,108,255,.25) !important;}';
     function poeEstilo() {
         var alvo = document.head || document.documentElement;
         if (alvo) { alvo.appendChild(estilo); relato('estilo ok'); }
