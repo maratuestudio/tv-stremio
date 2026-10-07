@@ -22,7 +22,7 @@
     var ESQ = 37, CIMA = 38, DIR = 39, BAIXO = 40, OK = 13, VOLTAR = 10009;
 
     var estilo = document.createElement('style');
-    estilo.textContent = '.bottom-notification{display:none !important}.tv-foco{outline:4px solid #8c6cff !important;outline-offset:3px !important;border-radius:12px;box-shadow:0 0 0 8px rgba(140,108,255,.25) !important;}';
+    estilo.textContent = 'body.tv-barra #controlbar.hidden{transform:none !important}#controlbar .control.tv-foco .icon{opacity:1 !important}#controlbar .popup li.tv-foco,#controlbar .popup .tv-foco{background:rgba(140,108,255,.35) !important}.bottom-notification{display:none !important}.tv-foco{outline:4px solid #8c6cff !important;outline-offset:3px !important;border-radius:12px;box-shadow:0 0 0 8px rgba(140,108,255,.25) !important;}';
     function poeEstilo() {
         var alvo = document.head || document.documentElement;
         if (alvo) { alvo.appendChild(estilo); relato('estilo ok'); }
@@ -154,10 +154,15 @@
     function noPlayer() { return (location.hash || '').indexOf('#/player') === 0; }
     function video() { return document.querySelector('video'); }
 
+    // A barra some com a classe .hidden (translateY) quando o mouse para; na TV não há mouse,
+    // então body.tv-barra a mantém na tela: fixa nos controles, por 3 s depois de pausar/pular.
+    var barraTimer = null;
     function mostrarBarra() {
-        var ev = document.createEvent('MouseEvents');
-        ev.initMouseEvent('mousemove', true, true, window, 0, 0, 0, 960, 540, false, false, false, false, 0, null);
-        document.body.dispatchEvent(ev);
+        document.body.classList.add('tv-barra');
+        clearTimeout(barraTimer);
+        barraTimer = setTimeout(function () {
+            if (!nosControles && !popupAberto()) document.body.classList.remove('tv-barra');
+        }, 3000);
     }
 
     function popupAberto() { return document.querySelector('#controlbar .control.active'); }
@@ -211,7 +216,7 @@
 
         if (k === VOLTAR) {
             if (fecharPopups()) return true;
-            if (nosControles) { nosControles = false; marcar(null); return true; }
+            if (nosControles) { nosControles = false; marcar(null); mostrarBarra(); return true; }
             var sair = document.querySelector('.tab[ng-click*="playerGoBack"]');
             if (sair) sair.click(); else history.back();
             return true;
@@ -250,7 +255,7 @@
         return true;
     }
 
-    window.addEventListener('hashchange', function () { if (!noPlayer()) { nosControles = false; fecharPopups(); } });
+    window.addEventListener('hashchange', function () { if (!noPlayer()) { nosControles = false; fecharPopups(); document.body.classList.remove('tv-barra'); } });
 
     window.addEventListener('keydown', function (e) {
         if (noPlayer() && teclaPlayer(e)) return;
