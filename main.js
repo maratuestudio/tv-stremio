@@ -6,12 +6,26 @@
     if (window.__tvStremio) return;
     window.__tvStremio = true;
 
+    // Diagnóstico temporário: manda o que acontece na TV pro Mac (192.168.0.113:8765).
+    var enviados = 0;
+    function relato(m) {
+        if (enviados++ > 200) return;
+        try { new Image().src = 'http://192.168.0.113:8765/?m=' + encodeURIComponent(m) + '&t=' + Date.now(); } catch (e) {}
+    }
+    window.addEventListener('error', function (e) { relato('ERRO ' + e.message + ' @' + e.lineno); }, true);
+    relato('carregou ' + location.href + ' estado=' + document.readyState + ' ua=' + navigator.userAgent);
+
     var SELETOR = 'a[href], button, input, select, textarea, [ng-click], [href], [ui-sref], .tab, li[tabindex], [tabindex="0"]';
     var ESQ = 37, CIMA = 38, DIR = 39, BAIXO = 40, OK = 13, VOLTAR = 10009;
 
     var estilo = document.createElement('style');
     estilo.textContent = '.tv-foco{outline:4px solid #8c6cff !important;outline-offset:3px !important;border-radius:12px;box-shadow:0 0 0 8px rgba(140,108,255,.25) !important;}';
-    (document.head || document.documentElement).appendChild(estilo);
+    function poeEstilo() {
+        var alvo = document.head || document.documentElement;
+        if (alvo) { alvo.appendChild(estilo); relato('estilo ok'); }
+        else setTimeout(poeEstilo, 100);
+    }
+    poeEstilo();
 
     var atual = null;
 
@@ -103,6 +117,7 @@
     }
 
     window.addEventListener('keydown', function (e) {
+        relato('tecla ' + e.keyCode + ' foco=' + (document.activeElement && document.activeElement.tagName) + ' atual=' + (atual ? atual.tagName + '.' + String(atual.className).slice(0, 25) : '-') + ' cands=' + (e.keyCode >= 37 && e.keyCode <= 40 ? candidatos().length : ''));
         var k = e.keyCode, ativo = document.activeElement;
         var digitando = ativo && (ativo.tagName === 'TEXTAREA' || (ativo.tagName === 'INPUT' && /^(text|email|password|search|url|number|tel)?$/.test(ativo.type || '')));
 
@@ -134,4 +149,5 @@
             clicar(atual);
         }
     }, true);
+    relato('pronto');
 })();
