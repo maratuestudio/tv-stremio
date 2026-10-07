@@ -1,0 +1,11 @@
+{
+  "name": "tv-stremio",
+  "appName": "Stremio TV",
+  "version": "1.0.0",
+  "description": "Abre a versão clássica do Stremio (app.strem.io), leve o bastante para TVs Samsung de 2018.",
+  "packageType": "mods",
+  "websiteURL": "https://app.strem.io/",
+  "main": "main.js",
+  "keys": ["MediaPlayPause", "MediaPlay", "MediaPause", "MediaStop", "MediaRewind", "MediaFastForward"],
+  "license": "MIT"
+}
