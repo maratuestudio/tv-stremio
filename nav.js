@@ -32,34 +32,50 @@
 
     var atual = null;
 
-    function visivel(el) {
-        if (!el.getClientRects().length) return false;
-        var r = el.getBoundingClientRect();
+    // Item alcançável: tem tamanho e está no máximo a 1,5 tela de distância na vertical.
+    // O teste de "coberto" é caro (hit test), então fica separado e só roda no item escolhido.
+    function alcancavel(el, r) {
         if (r.width < 4 || r.height < 4) return false;
         if (r.right < 0 || r.left > innerWidth) return false;
-        var s = getComputedStyle(el);
-        if (s.visibility === 'hidden' || s.display === 'none' || s.opacity === '0' || s.pointerEvents === 'none') return false;
-        // Na tela: descarta o que está coberto por outra coisa (menu aberto, janela por cima).
+        return !(r.bottom < -innerHeight * 1.5 || r.top > innerHeight * 2.5);
+    }
+
+    // Na tela e coberto por outra coisa (menu aberto, janela por cima)?
+    function coberto(el, r) {
         var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
         if (cy > 0 && cy < innerHeight && cx > 0 && cx < innerWidth) {
             var topo = document.elementFromPoint(cx, cy);
-            if (topo && topo !== el && !el.contains(topo) && !topo.contains(el)) return false;
+            if (!topo) return true;
+            if (topo !== el && !el.contains(topo) && !topo.contains(el)) return true;
         }
-        return true;
+        return false;
     }
 
+    function visivel(el) {
+        if (!el || !el.getClientRects().length) return false;
+        var r = el.getBoundingClientRect();
+        return alcancavel(el, r) && !coberto(el, r);
+    }
+
+    // Lista de {el, r}: o retângulo é medido uma vez só por tecla.
     function candidatos() {
-        var todos = document.querySelectorAll(SELETOR), lista = [];
-        for (var i = 0; i < todos.length; i++) {
+        var todos = document.querySelectorAll(SELETOR), lista = [], i;
+        for (i = 0; i < todos.length; i++) {
             var el = todos[i];
-            if (el.disabled || el.type === 'hidden' || !visivel(el)) continue;
-            lista.push(el);
+            if (el.disabled || el.type === 'hidden') continue;
+            var r = el.getBoundingClientRect();
+            if (alcancavel(el, r)) lista.push({ el: el, r: r });
         }
-        // Quando um item clicável contém outro, fica só o de dentro (mais preciso).
-        return lista.filter(function (el) {
-            for (var j = 0; j < lista.length; j++) if (lista[j] !== el && el.contains(lista[j])) return false;
-            return true;
-        });
+        // Quando um item clicável contém outro, fica só o de dentro: marca os ancestrais dos candidatos.
+        var temFilho = [];
+        for (i = 0; i < lista.length; i++) {
+            var pai = lista[i].el.parentNode;
+            while (pai && pai !== document.body) { pai.__tvPai = true; temFilho.push(pai); pai = pai.parentNode; }
+        }
+        var final = [];
+        for (i = 0; i < lista.length; i++) if (!lista[i].el.__tvPai) final.push(lista[i]);
+        for (i = 0; i < temFilho.length; i++) temFilho[i].__tvPai = false;
+        return final;
     }
 
     // Distância entre as faixas no eixo perpendicular (0 quando se sobrepõem).
@@ -80,18 +96,22 @@
         if (r.top < 0 || r.bottom > innerHeight) el.scrollIntoView({ block: 'center' });
     }
 
-    function mover(dir) {
-        var lista = candidatos();
-        if (!atual || !document.documentElement.contains(atual) || !visivel(atual)) {
-            var ativo = document.activeElement;
-            marcar(lista.indexOf(ativo) !== -1 ? ativo : (lista[0] || null));
+    function mover(dir, pronta) {
+        var lista = pronta || candidatos(), i, naLista = false;
+        // Lista pronta (player): vale quem está nela, sem teste de cobertura.
+        if (pronta) for (i = 0; i < lista.length; i++) if (lista[i].el === atual) naLista = true;
+        if (!atual || !document.documentElement.contains(atual) || (pronta ? !naLista : !visivel(atual))) {
+            var ativo = document.activeElement, achou = null;
+            for (i = 0; i < lista.length; i++) if (lista[i].el === ativo) achou = ativo;
+            if (!achou) for (i = 0; i < lista.length && !achou; i++) if (pronta || !coberto(lista[i].el, lista[i].r)) achou = lista[i].el;
+            marcar(achou);
             return;
         }
-        var a = atual.getBoundingClientRect(), ca = centro(a), melhor = null, nota = Infinity;
-        for (var i = 0; i < lista.length; i++) {
-            var el = lista[i];
+        var a = atual.getBoundingClientRect(), ca = centro(a), fila = [];
+        for (i = 0; i < lista.length; i++) {
+            var el = lista[i].el, r = lista[i].r;
             if (el === atual || el.contains(atual) || atual.contains(el)) continue;
-            var r = el.getBoundingClientRect(), c = centro(r), dx = c.x - ca.x, dy = c.y - ca.y, principal, lateral;
+            var c = centro(r), dx = c.x - ca.x, dy = c.y - ca.y, principal, lateral;
             // Só vale o que está inteiramente do lado pedido (tolerância de 10 px).
             if (dir === DIR) { if (r.left < a.right - 10) continue; principal = r.left - a.right; lateral = folga(r.top, r.bottom, a.top, a.bottom); }
             else if (dir === ESQ) { if (r.right > a.left + 10) continue; principal = a.left - r.right; lateral = folga(r.top, r.bottom, a.top, a.bottom); }
@@ -99,9 +119,12 @@
             else { if (r.bottom > a.top + 10) continue; principal = a.top - r.bottom; lateral = folga(r.left, r.right, a.left, a.right); }
             principal = Math.max(principal, 0) + 1;
             var n = principal + lateral * 2 + Math.abs(dir === DIR || dir === ESQ ? dy : dx) * 0.05;
-            if (n < nota) { nota = n; melhor = el; }
+            fila.push({ el: el, r: r, n: n });
         }
-        if (melhor) marcar(melhor);
+        fila.sort(function (x, y) { return x.n - y.n; });
+        for (i = 0; i < fila.length && i < 25; i++) {
+            if (pronta || !coberto(fila[i].el, fila[i].r)) { marcar(fila[i].el); return; }
+        }
     }
 
     function clicar(el) {
@@ -119,8 +142,118 @@
         return h === '' || h === '#' || h === '#/' || h === '#!/';
     }
 
+
+    // ---- Player ----
+    // No player, as setas e o OK não navegam pela tela: OK pausa, esquerda/direita voltam/avançam
+    // 10 s, cima/baixo entram nos controles (legenda, velocidade...). Voltar sai dos controles;
+    // só um voltar sem controles abertos sai do vídeo. A tela inteira do player tem um
+    // ng-click="goBack()" invisível, por isso o player nunca usa a navegação geral.
+    var MIDIA = { 10252: 'alternar', 415: 'tocar', 19: 'pausar', 417: 'avancar', 412: 'voltar' };
+    var nosControles = false;
+
+    function noPlayer() { return (location.hash || '').indexOf('#/player') === 0; }
+    function video() { return document.querySelector('video'); }
+
+    function mostrarBarra() {
+        var ev = document.createEvent('MouseEvents');
+        ev.initMouseEvent('mousemove', true, true, window, 0, 0, 0, 960, 540, false, false, false, false, 0, null);
+        document.body.dispatchEvent(ev);
+    }
+
+    function popupAberto() { return document.querySelector('#controlbar .control.active'); }
+
+    function fecharPopups() {
+        var abertos = document.querySelectorAll('#controlbar .control.active');
+        for (var i = 0; i < abertos.length; i++) abertos[i].classList.remove('active');
+        return abertos.length > 0;
+    }
+
+    function candidatosPlayer() {
+        var aberto = popupAberto();
+        var raiz = aberto ? aberto.querySelector('.popup') : document;
+        var sel = aberto ? '[ng-click], li, .toggle, .player-setting' : '#controlbar .control, .player-setting';
+        var todos = raiz.querySelectorAll(sel), lista = [];
+        for (var i = 0; i < todos.length; i++) {
+            var el = todos[i], r = el.getBoundingClientRect();
+            if (r.width < 4 || r.height < 4 || r.width > innerWidth * 0.9) continue;
+            if (!aberto && el.closest && el.closest('.popup')) continue;
+            lista.push({ el: el, r: r });
+        }
+        return lista;
+    }
+
+    function pausarOuTocar(acao) {
+        var v = video();
+        if (!v) return;
+        var querPausar = acao === 'pausar' || (acao !== 'tocar' && !v.paused);
+        var botao = document.querySelector('#controlbar .control[ng-click*="paused"]');
+        if (querPausar !== v.paused) {
+            if (botao) botao.click(); else if (querPausar) v.pause(); else v.play();
+        }
+    }
+
+    function pular(segundos) {
+        var v = video();
+        if (v && isFinite(v.duration)) v.currentTime = Math.max(0, Math.min(v.duration - 1, v.currentTime + segundos));
+    }
+
+    function teclaPlayer(e) {
+        var k = e.keyCode;
+        if (MIDIA[k]) {
+            e.preventDefault(); e.stopImmediatePropagation(); mostrarBarra();
+            var m = MIDIA[k];
+            if (m === 'avancar') pular(30); else if (m === 'voltar') pular(-30); else pausarOuTocar(m);
+            return true;
+        }
+        if (k !== ESQ && k !== DIR && k !== CIMA && k !== BAIXO && k !== OK && k !== VOLTAR) return false;
+        e.preventDefault(); e.stopImmediatePropagation();
+        mostrarBarra();
+
+        if (k === VOLTAR) {
+            if (fecharPopups()) return true;
+            if (nosControles) { nosControles = false; marcar(null); return true; }
+            var sair = document.querySelector('.tab[ng-click*="playerGoBack"]');
+            if (sair) sair.click(); else history.back();
+            return true;
+        }
+
+        if (!nosControles) {
+            if (k === OK) pausarOuTocar('alternar');
+            else if (k === ESQ) pular(-10);
+            else if (k === DIR) pular(10);
+            else { nosControles = true; var l = candidatosPlayer(); marcar(l.length ? l[0].el : null); }
+            return true;
+        }
+
+        if (k === OK) {
+            if (!atual) return true;
+            var acao = atual.getAttribute('ng-click');
+            if (atual.classList.contains('control') && !acao) {
+                var abrir = !atual.classList.contains('active');
+                fecharPopups();
+                if (abrir) {
+                    atual.classList.add('active');
+                    var itens = candidatosPlayer();
+                    if (itens.length) marcar(itens[0].el);
+                }
+            } else {
+                atual.click();
+                if (atual.tagName === 'LI' || atual.classList.contains('player-setting')) {
+                    var dono = atual.closest('.control');
+                    fecharPopups();
+                    if (dono) marcar(dono);
+                }
+            }
+            return true;
+        }
+        mover(k, candidatosPlayer());
+        return true;
+    }
+
+    window.addEventListener('hashchange', function () { if (!noPlayer()) { nosControles = false; fecharPopups(); } });
+
     window.addEventListener('keydown', function (e) {
-        relato('tecla ' + e.keyCode + ' foco=' + (document.activeElement && document.activeElement.tagName) + ' atual=' + (atual ? atual.tagName + '.' + String(atual.className).slice(0, 25) : '-') + ' cands=' + (e.keyCode >= 37 && e.keyCode <= 40 ? candidatos().length : ''));
+        if (noPlayer() && teclaPlayer(e)) return;
         var k = e.keyCode, ativo = document.activeElement;
         var digitando = ativo && (ativo.tagName === 'TEXTAREA' || (ativo.tagName === 'INPUT' && /^(text|email|password|search|url|number|tel)?$/.test(ativo.type || '')));
 
