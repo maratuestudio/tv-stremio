@@ -9,7 +9,9 @@
     // Diagnóstico temporário: manda o que acontece na TV pro Mac (192.168.0.113:8765).
     var enviados = 0;
     function relato(m) {
-        if (enviados++ > 200) return;
+        // Diagnóstico desligado (ligar trocando DIAG pra true e rodando ~/tv-samsung/escuta.py).
+        var DIAG = false;
+        if (!DIAG || enviados++ > 200) return;
         try { new Image().src = 'http://192.168.0.113:8765/?m=' + encodeURIComponent(m) + '&t=' + Date.now(); } catch (e) {}
     }
     // Só erros de script; falha de imagem/recurso não tem mensagem e lotava o relatório.
