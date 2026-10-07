@@ -149,5 +149,85 @@
             clicar(atual);
         }
     }, true);
+
+    // Login por código: na tela de login, pede um código ao Stremio (link.stremio.com),
+    // mostra na tela e espera a aprovação feita em outro aparelho já logado.
+    // Aprovado, grava a sessão como o Stremio clássico guarda (localStorage "authKey" e "user").
+    var painel = null, codigoAtual = null, consulta = null;
+
+    function logado() {
+        try { var u = JSON.parse(localStorage.getItem('user') || 'null'); return !!(u && u.authKey); } catch (e) { return false; }
+    }
+
+    function pedir(metodo, url, corpo, pronto) {
+        var x = new XMLHttpRequest();
+        x.open(metodo, url, true);
+        if (corpo) x.setRequestHeader('content-type', 'application/json');
+        x.onload = function () { var j = null; try { j = JSON.parse(x.responseText); } catch (e) {} pronto(j); };
+        x.onerror = function () { pronto(null); };
+        x.send(corpo ? JSON.stringify(corpo) : null);
+    }
+
+    function mostrarPainel(html) {
+        if (!painel) {
+            painel = document.createElement('div');
+            painel.style.cssText = 'position:fixed;left:50%;bottom:40px;transform:translateX(-50%);z-index:99999;pointer-events:none;' +
+                'background:#1b1740;border:2px solid #8c6cff;border-radius:20px;padding:24px 36px;color:#fff;font:22px/1.4 sans-serif;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.6)';
+            document.body.appendChild(painel);
+        }
+        painel.innerHTML = html;
+    }
+
+    function tirarPainel() {
+        if (painel && painel.parentNode) painel.parentNode.removeChild(painel);
+        painel = null; codigoAtual = null;
+        if (consulta) { clearInterval(consulta); consulta = null; }
+    }
+
+    function concluir(authKey) {
+        pedir('POST', 'https://api.strem.io/api/getUser', { authKey: authKey }, function (j) {
+            var user = j && j.result;
+            if (!user || !user._id) { relato('login: getUser falhou ' + JSON.stringify(j).slice(0, 120)); return; }
+            user.authKey = authKey;
+            localStorage.setItem('authKey', JSON.stringify(authKey));
+            localStorage.setItem('user', JSON.stringify(user));
+            relato('login: ok ' + (user.email || user._id));
+            mostrarPainel('Conectado! Abrindo o Stremio...');
+            setTimeout(function () { location.hash = '#/'; location.reload(); }, 1200);
+        });
+    }
+
+    function iniciarCodigo() {
+        if (codigoAtual) return;
+        codigoAtual = 'pedindo';
+        pedir('GET', 'https://link.stremio.com/api/create?type=Create', null, function (j) {
+            var r = j && (j.result || j);
+            if (!r || !r.code) { codigoAtual = null; relato('login: create falhou'); return; }
+            codigoAtual = r.code;
+            relato('login: codigo ' + r.code);
+            mostrarPainel('<div style="opacity:.75">Entrar sem digitar senha: no celular ou computador logado, abra</div>' +
+                '<div style="font-size:30px;margin:6px 0 2px">link.stremio.com</div>' +
+                '<div style="opacity:.75">e digite o código</div>' +
+                '<div style="font-size:64px;letter-spacing:12px;font-weight:bold;color:#b9a6ff;margin-top:6px">' + r.code + '</div>');
+            consulta = setInterval(function () {
+                pedir('GET', 'https://link.stremio.com/api/read?type=Read&code=' + encodeURIComponent(r.code), null, function (k) {
+                    var res = k && k.result;
+                    var chave = res && (res.authKey || (res.user && res.user.authKey));
+                    if (chave) { clearInterval(consulta); consulta = null; concluir(chave); }
+                });
+            }, 3000);
+            // O código expira; troca por um novo a cada 4 minutos.
+            setTimeout(function () { if (codigoAtual === r.code && !logado()) { tirarPainel(); vigiarLogin(); } }, 240000);
+        });
+    }
+
+    function vigiarLogin() {
+        var naTelaLogin = (location.hash || '').indexOf('#/intro') === 0;
+        if (naTelaLogin && !logado() && document.body) iniciarCodigo();
+        else if (!naTelaLogin && codigoAtual) tirarPainel();
+    }
+    window.addEventListener('hashchange', vigiarLogin);
+    setInterval(vigiarLogin, 2000);
+
     relato('pronto');
 })();
