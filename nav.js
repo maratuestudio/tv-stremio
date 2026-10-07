@@ -428,12 +428,60 @@
 
 
     // Servidor de streaming: a TV não tem um, então usa o do Mac pelo endereço HTTPS que o próprio
-    // servidor do Stremio fornece (HTTP comum é bloqueado numa página HTTPS). IP fixo do Mac na rede.
-    var SERVIDOR = 'https://192-168-0-113.519b6502d940.stremio.rocks:12470';
+    // servidor do Stremio fornece (HTTP comum é bloqueado numa página HTTPS). O endereço codifica o
+    // IP do Mac; se ele mudar, a TV varre 192.168.0.x até achar e guarda o novo (localStorage).
+    var DOMINIO = '.519b6502d940.stremio.rocks:12470';
+    var SERVIDOR = null;
+    function urlDoIp(ip) { return 'https://' + ip.replace(/\./g, '-') + DOMINIO; }
+
+    function testarIp(ip, pronto) {
+        var x = new XMLHttpRequest(), feito = false;
+        function fim(ok) { if (!feito) { feito = true; pronto(ok); } }
+        try {
+            x.open('GET', urlDoIp(ip) + '/settings', true);
+            x.timeout = 2500;
+            x.onload = function () { fim(x.status === 200); };
+            x.onerror = x.ontimeout = function () { fim(false); };
+            x.send();
+        } catch (e) { fim(false); }
+    }
+
+    function acharServidor(pronto) {
+        var salvo = '192.168.0.113';
+        try { salvo = localStorage.getItem('tvServidorIP') || salvo; } catch (e) {}
+        testarIp(salvo, function (ok) {
+            if (ok) return pronto(salvo);
+            // Varre do mais perto do último IP pro mais longe, 16 por vez.
+            var base = +salvo.split('.')[3] || 113, fila = [], d, achou = false;
+            for (d = 1; d < 254; d++) {
+                if (base + d <= 254) fila.push(base + d);
+                if (base - d >= 2) fila.push(base - d);
+            }
+            function lote() {
+                if (achou) return;
+                if (!fila.length) return pronto(null);
+                var parte = fila.splice(0, 16), faltam = parte.length;
+                parte.forEach(function (n) {
+                    var ip = '192.168.0.' + n;
+                    testarIp(ip, function (ok) {
+                        if (ok && !achou) {
+                            achou = true;
+                            try { localStorage.setItem('tvServidorIP', ip); } catch (e) {}
+                            relato('servidor achado em ' + ip);
+                            pronto(ip);
+                        }
+                        if (--faltam === 0) lote();
+                    });
+                });
+            }
+            lote();
+        });
+    }
+
     function apontarServidor() {
         try {
             var inj = window.angular && angular.element(document.body).injector();
-            if (!inj) return false;
+            if (!inj || !SERVIDOR) return false;
             var efs = inj.get('enginefs');
             if (efs.baseUrl !== SERVIDOR) {
                 efs.customUrl = true; efs.baseUrl = SERVIDOR; efs.factoryUrl = SERVIDOR; efs.isOnline = true;
@@ -442,7 +490,15 @@
             return true;
         } catch (e) { return false; }
     }
-    var tentativas = setInterval(function () { if (apontarServidor()) clearInterval(tentativas); }, 500);
+
+    function procurarServidor() {
+        acharServidor(function (ip) {
+            if (!ip) { setTimeout(procurarServidor, 60000); return; } // Mac desligado: tenta de novo em 1 min
+            SERVIDOR = urlDoIp(ip);
+            var tentativas = setInterval(function () { if (apontarServidor()) clearInterval(tentativas); }, 500);
+        });
+    }
+    procurarServidor();
 
     relato('pronto');
 })();
