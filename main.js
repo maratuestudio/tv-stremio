@@ -1,153 +1,17 @@
-// Módulo TizenBrew do Stremio clássico (app.strem.io) para TV Samsung.
-// A navegação por setas do Stremio clássico não alcança o menu lateral nem o topo,
-// então este arquivo assume as setas: cada uma leva ao item clicável mais próximo naquela direção.
-// OK clica no item; o voltar do controle (10009) fecha teclado/menus, volta uma página ou sai do app.
+// Carregador fixo do módulo. O CDN do TizenBrew guarda arquivos por horas, então a lógica
+// mora em nav.js e é buscada sempre fresca do GitHub. Este arquivo não deve mudar.
 (function () {
-    if (window.__tvStremio) return;
-    window.__tvStremio = true;
-
-    // Diagnóstico temporário: manda o que acontece na TV pro Mac (192.168.0.113:8765).
-    var enviados = 0;
+    var url = 'https://raw.githubusercontent.com/maratuestudio/tv-stremio/main/nav.js?t=' + Date.now();
     function relato(m) {
-        if (enviados++ > 200) return;
         try { new Image().src = 'http://192.168.0.113:8765/?m=' + encodeURIComponent(m) + '&t=' + Date.now(); } catch (e) {}
     }
-    window.addEventListener('error', function (e) { relato('ERRO ' + e.message + ' @' + e.lineno); }, true);
-    relato('carregou ' + location.href + ' estado=' + document.readyState + ' ua=' + navigator.userAgent);
-
-    var SELETOR = 'a[href], button, input, select, textarea, [ng-click], [href], [ui-sref], .tab, li[tabindex], [tabindex="0"]';
-    var ESQ = 37, CIMA = 38, DIR = 39, BAIXO = 40, OK = 13, VOLTAR = 10009;
-
-    var estilo = document.createElement('style');
-    estilo.textContent = '.tv-foco{outline:4px solid #8c6cff !important;outline-offset:3px !important;border-radius:12px;box-shadow:0 0 0 8px rgba(140,108,255,.25) !important;}';
-    function poeEstilo() {
-        var alvo = document.head || document.documentElement;
-        if (alvo) { alvo.appendChild(estilo); relato('estilo ok'); }
-        else setTimeout(poeEstilo, 100);
+    function roda(txt) {
+        try { (0, eval)(txt); } catch (e) { relato('ERRO nav.js ' + e.message); }
     }
-    poeEstilo();
-
-    var atual = null;
-
-    function visivel(el) {
-        if (!el.getClientRects().length) return false;
-        var r = el.getBoundingClientRect();
-        if (r.width < 4 || r.height < 4) return false;
-        if (r.right < 0 || r.left > innerWidth) return false;
-        var s = getComputedStyle(el);
-        if (s.visibility === 'hidden' || s.display === 'none' || s.opacity === '0' || s.pointerEvents === 'none') return false;
-        // Na tela: descarta o que está coberto por outra coisa (menu aberto, janela por cima).
-        var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-        if (cy > 0 && cy < innerHeight && cx > 0 && cx < innerWidth) {
-            var topo = document.elementFromPoint(cx, cy);
-            if (topo && topo !== el && !el.contains(topo) && !topo.contains(el)) return false;
-        }
-        return true;
-    }
-
-    function candidatos() {
-        var todos = document.querySelectorAll(SELETOR), lista = [];
-        for (var i = 0; i < todos.length; i++) {
-            var el = todos[i];
-            if (el.disabled || el.type === 'hidden' || !visivel(el)) continue;
-            lista.push(el);
-        }
-        // Quando um item clicável contém outro, fica só o de dentro (mais preciso).
-        return lista.filter(function (el) {
-            for (var j = 0; j < lista.length; j++) if (lista[j] !== el && el.contains(lista[j])) return false;
-            return true;
-        });
-    }
-
-    // Distância entre as faixas no eixo perpendicular (0 quando se sobrepõem).
-    function folga(a1, a2, b1, b2) { return a2 < b1 ? b1 - a2 : (b2 < a1 ? a1 - b2 : 0); }
-
-    function centro(r) { return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
-
-    function marcar(el) {
-        if (atual) atual.classList.remove('tv-foco');
-        atual = el;
-        if (!el) return;
-        el.classList.add('tv-foco');
-        if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') {
-            if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');
-            try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
-        }
-        var r = el.getBoundingClientRect();
-        if (r.top < 0 || r.bottom > innerHeight) el.scrollIntoView({ block: 'center' });
-    }
-
-    function mover(dir) {
-        var lista = candidatos();
-        if (!atual || !document.documentElement.contains(atual) || !visivel(atual)) {
-            var ativo = document.activeElement;
-            marcar(lista.indexOf(ativo) !== -1 ? ativo : (lista[0] || null));
-            return;
-        }
-        var a = atual.getBoundingClientRect(), ca = centro(a), melhor = null, nota = Infinity;
-        for (var i = 0; i < lista.length; i++) {
-            var el = lista[i];
-            if (el === atual || el.contains(atual) || atual.contains(el)) continue;
-            var r = el.getBoundingClientRect(), c = centro(r), dx = c.x - ca.x, dy = c.y - ca.y, principal, lateral;
-            // Só vale o que está inteiramente do lado pedido (tolerância de 10 px).
-            if (dir === DIR) { if (r.left < a.right - 10) continue; principal = r.left - a.right; lateral = folga(r.top, r.bottom, a.top, a.bottom); }
-            else if (dir === ESQ) { if (r.right > a.left + 10) continue; principal = a.left - r.right; lateral = folga(r.top, r.bottom, a.top, a.bottom); }
-            else if (dir === BAIXO) { if (r.top < a.bottom - 10) continue; principal = r.top - a.bottom; lateral = folga(r.left, r.right, a.left, a.right); }
-            else { if (r.bottom > a.top + 10) continue; principal = a.top - r.bottom; lateral = folga(r.left, r.right, a.left, a.right); }
-            principal = Math.max(principal, 0) + 1;
-            var n = principal + lateral * 2 + Math.abs(dir === DIR || dir === ESQ ? dy : dx) * 0.05;
-            if (n < nota) { nota = n; melhor = el; }
-        }
-        if (melhor) marcar(melhor);
-    }
-
-    function clicar(el) {
-        if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) { el.click(); return; }
-        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') { el.focus(); return; }
-        var href = el.getAttribute('href');
-        var antes = location.href;
-        el.click();
-        if (href && href.charAt(0) === '#' && location.href === antes) location.hash = href.slice(1);
-        setTimeout(function () { if (!atual || !visivel(atual)) marcar(null); }, 400);
-    }
-
-    function naInicial() {
-        var h = location.hash || '';
-        return h === '' || h === '#' || h === '#/' || h === '#!/';
-    }
-
-    window.addEventListener('keydown', function (e) {
-        relato('tecla ' + e.keyCode + ' foco=' + (document.activeElement && document.activeElement.tagName) + ' atual=' + (atual ? atual.tagName + '.' + String(atual.className).slice(0, 25) : '-') + ' cands=' + (e.keyCode >= 37 && e.keyCode <= 40 ? candidatos().length : ''));
-        var k = e.keyCode, ativo = document.activeElement;
-        var digitando = ativo && (ativo.tagName === 'TEXTAREA' || (ativo.tagName === 'INPUT' && /^(text|email|password|search|url|number|tel)?$/.test(ativo.type || '')));
-
-        if (k === VOLTAR) {
-            e.preventDefault(); e.stopImmediatePropagation();
-            if (digitando) { ativo.blur(); return; }
-            var aberto = document.querySelector('.modal.open, .modal.show, [class*="menu"].open, .user-menu.open');
-            if (window.angular && angular.element(document.body).scope) {
-                var raiz = angular.element(document.body).scope().$root;
-                if (raiz && raiz.userMenuOpen) { raiz.$apply(function () { raiz.userMenuOpen = false; }); return; }
-            }
-            if (aberto) { var esc = document.createEvent('Event'); esc.initEvent('keydown', true, true); esc.keyCode = 27; esc.which = 27; document.body.dispatchEvent(esc); return; }
-            if (naInicial()) { try { tizen.application.getCurrentApplication().exit(); } catch (x) {} }
-            else history.back();
-            return;
-        }
-
-        if (k === ESQ || k === CIMA || k === DIR || k === BAIXO) {
-            // Dentro de um campo de texto, esquerda/direita andam no texto.
-            if (digitando && (k === ESQ || k === DIR)) return;
-            e.preventDefault(); e.stopImmediatePropagation();
-            if (digitando) ativo.blur();
-            mover(k);
-            return;
-        }
-
-        if (k === OK && atual && !digitando) {
-            e.preventDefault(); e.stopImmediatePropagation();
-            clicar(atual);
-        }
-    }, true);
-    relato('pronto');
+    relato('carregador iniciou');
+    var x = new XMLHttpRequest();
+    x.open('GET', url, true);
+    x.onload = function () { if (x.status === 200) roda(x.responseText); else relato('nav.js status ' + x.status); };
+    x.onerror = function () { relato('nav.js falhou na rede'); };
+    x.send();
 })();
