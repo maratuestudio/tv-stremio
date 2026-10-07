@@ -197,9 +197,65 @@
         }
     }
 
+    // O player do Stremio guarda tempo e duração em ms (player.time / player.length) e o setter de
+    // time faz o pulo certo também no vídeo convertido (HLS), onde mexer no <video> não funciona.
+    function playerStremio() {
+        try {
+            var bar = document.querySelector('#controlbar');
+            var sc = bar && window.angular && angular.element(bar).scope();
+            return sc && sc.player ? { sc: sc, pl: sc.player } : null;
+        } catch (e) { return null; }
+    }
+
+    function tempos() {
+        var ps = playerStremio(), v = video();
+        if (ps && ps.pl.length > 0) return { t: ps.pl.time / 1000, d: ps.pl.length / 1000 };
+        if (v && isFinite(v.duration)) return { t: v.currentTime, d: v.duration };
+        return null;
+    }
+
     function pular(segundos) {
-        var v = video();
-        if (v && isFinite(v.duration)) v.currentTime = Math.max(0, Math.min(v.duration - 1, v.currentTime + segundos));
+        var ps = playerStremio(), v = video();
+        if (ps && ps.pl.length > 0) {
+            var alvo = Math.max(0, Math.min(ps.pl.length - 1000, ps.pl.time + segundos * 1000));
+            ps.sc.$apply(function () { ps.pl.time = alvo; });
+        } else if (v && isFinite(v.duration)) {
+            v.currentTime = Math.max(0, Math.min(v.duration - 1, v.currentTime + segundos));
+        }
+        mostrarTempo();
+    }
+
+    // Painel de tempo: aparece 3 s a cada OK/seta no vídeo, atualiza só enquanto visível.
+    var painelTempo = null, tempoTimer = null, tempoAtualiza = null;
+    function hms(x) {
+        x = Math.max(0, Math.floor(x));
+        var h = Math.floor(x / 3600), m = Math.floor(x % 3600 / 60), sg = x % 60;
+        return (h ? h + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (sg < 10 ? '0' : '') + sg;
+    }
+    function desenharTempo() {
+        var tp = tempos();
+        if (!tp || !painelTempo) return;
+        var pct = Math.min(100, tp.t / tp.d * 100);
+        painelTempo.innerHTML = '<div style="display:flex;justify-content:space-between;font-size:26px;margin-bottom:10px">' +
+            '<span><b>' + hms(tp.t) + '</b> / ' + hms(tp.d) + '</span><span style="opacity:.8">faltam ' + hms(tp.d - tp.t) + '</span></div>' +
+            '<div style="height:8px;background:rgba(255,255,255,.25);border-radius:4px"><div style="height:8px;width:' + pct + '%;background:#8c6cff;border-radius:4px"></div></div>';
+    }
+    function mostrarTempo() {
+        if (!painelTempo) {
+            painelTempo = document.createElement('div');
+            painelTempo.style.cssText = 'position:fixed;left:50%;top:48px;transform:translateX(-50%);width:760px;z-index:100000;pointer-events:none;' +
+                'background:rgba(20,16,48,.88);border-radius:18px;padding:18px 28px;color:#fff;font-family:sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.5)';
+        }
+        if (!painelTempo.parentNode) document.body.appendChild(painelTempo);
+        painelTempo.style.display = 'block';
+        desenharTempo();
+        if (!tempoAtualiza) tempoAtualiza = setInterval(desenharTempo, 500);
+        clearTimeout(tempoTimer);
+        tempoTimer = setTimeout(esconderTempo, 3000);
+    }
+    function esconderTempo() {
+        if (painelTempo) painelTempo.style.display = 'none';
+        clearInterval(tempoAtualiza); tempoAtualiza = null;
     }
 
     function teclaPlayer(e) {
@@ -207,7 +263,7 @@
         if (MIDIA[k]) {
             e.preventDefault(); e.stopImmediatePropagation(); mostrarBarra();
             var m = MIDIA[k];
-            if (m === 'avancar') pular(30); else if (m === 'voltar') pular(-30); else pausarOuTocar(m);
+            if (m === 'avancar') pular(30); else if (m === 'voltar') pular(-30); else { pausarOuTocar(m); mostrarTempo(); }
             return true;
         }
         if (k !== ESQ && k !== DIR && k !== CIMA && k !== BAIXO && k !== OK && k !== VOLTAR) return false;
@@ -223,7 +279,7 @@
         }
 
         if (!nosControles) {
-            if (k === OK) pausarOuTocar('alternar');
+            if (k === OK) { pausarOuTocar('alternar'); mostrarTempo(); }
             else if (k === ESQ) pular(-10);
             else if (k === DIR) pular(10);
             else { nosControles = true; var l = candidatosPlayer(); marcar(l.length ? l[0].el : null); }
@@ -255,7 +311,7 @@
         return true;
     }
 
-    window.addEventListener('hashchange', function () { if (!noPlayer()) { nosControles = false; fecharPopups(); document.body.classList.remove('tv-barra'); } });
+    window.addEventListener('hashchange', function () { if (!noPlayer()) { nosControles = false; fecharPopups(); esconderTempo(); document.body.classList.remove('tv-barra'); } });
 
     window.addEventListener('keydown', function (e) {
         if (noPlayer() && teclaPlayer(e)) return;
