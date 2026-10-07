@@ -232,5 +232,23 @@
     window.addEventListener('hashchange', vigiarLogin);
     setInterval(vigiarLogin, 2000);
 
+
+    // Servidor de streaming: a TV não tem um, então usa o do Mac pelo endereço HTTPS que o próprio
+    // servidor do Stremio fornece (HTTP comum é bloqueado numa página HTTPS). IP fixo do Mac na rede.
+    var SERVIDOR = 'https://192-168-0-113.519b6502d940.stremio.rocks:12470';
+    function apontarServidor() {
+        try {
+            var inj = window.angular && angular.element(document.body).injector();
+            if (!inj) return false;
+            var efs = inj.get('enginefs');
+            if (efs.baseUrl !== SERVIDOR) {
+                efs.customUrl = true; efs.baseUrl = SERVIDOR; efs.factoryUrl = SERVIDOR; efs.isOnline = true;
+                relato('servidor -> ' + SERVIDOR);
+            }
+            return true;
+        } catch (e) { return false; }
+    }
+    var tentativas = setInterval(function () { if (apontarServidor()) clearInterval(tentativas); }, 500);
+
     relato('pronto');
 })();
